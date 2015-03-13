@@ -34,21 +34,24 @@ module Audited
       # * +require_comment+ - Ensures that audit_comment is supplied before
       #   any create, update or destroy operation.
       #
+
       def audited(options = {})
         # don't allow multiple calls
         return if self.included_modules.include?(Audited::Auditor::AuditedInstanceMethods)
 
-        class_attribute :non_audited_columns,   :instance_writer => false
+        # class_attribute :non_audited_columns,   :instance_writer => false
+        class_attribute :audit_options,       :instance_writer => false
         class_attribute :auditing_enabled,      :instance_writer => false
         class_attribute :audit_associated_with, :instance_writer => false
 
-        if options[:only]
-          except = self.column_names - options[:only].flatten.map(&:to_s)
-        else
-          except = default_ignored_attributes + Audited.ignored_attributes
-          except |= Array(options[:except]).collect(&:to_s) if options[:except]
-        end
-        self.non_audited_columns = except
+        # if options[:only]
+        #   except = self.column_names - options[:only].flatten.map(&:to_s)
+        # else
+        #   except = default_ignored_attributes + Audited.ignored_attributes
+        #   except |= Array(options[:except]).collect(&:to_s) if options[:except]
+        # end
+        # self.non_audited_columns = except
+        self.audit_options = options
         self.audit_associated_with = options[:associated_with]
 
         if options[:comment_required]
@@ -73,7 +76,6 @@ module Audited
         set_callback :audit, :around, :around_audit, :if => lambda { self.respond_to?(:around_audit) }
 
         attr_accessor :version
-
         extend Audited::Auditor::AuditedClassMethods
         include Audited::Auditor::AuditedInstanceMethods
 
@@ -83,9 +85,33 @@ module Audited
       def has_associated_audits
         has_many :associated_audits, :as => :associated, :class_name => Audited.audit_class.name
       end
+
+      def non_audited_columns
+        @non_audited_columns ||= if audit_options[:only]
+          non_audited_columns_from_whitelist(audit_options[:only])
+        else
+          non_audited_columns_from_blacklist(audit_options[:except])
+        end
+      end
+
+      def non_audited_columns_from_whitelist(whitelist)
+        self.column_names - whitelist.flatten.map(&:to_s)
+      end
+
+      def non_audited_columns_from_blacklist(blacklist)
+        columns = default_ignored_attributes + Audited.ignored_attributes
+        columns |= Array(blacklist).collect(&:to_s) if blacklist
+        columns
+      end
+
     end
 
     module AuditedInstanceMethods
+
+      def non_audited_columns
+        self.class.non_audited_columns
+      end
+
       # Temporarily turns off auditing while saving.
       def save_without_auditing
         without_auditing { save }
